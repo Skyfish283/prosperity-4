@@ -1,4 +1,4 @@
-from datamodel import OrderDepth, UserId, TradingState, Order
+from datamodel import *
 from typing import List
 import string
 from statistics import *
@@ -6,8 +6,19 @@ from statistics import *
 class Trader:
 
     # we want to implement AS market making
-    def find_reservation(state: TradingState) -> int:
-        return 0
+    def find_reservation(self, product: Product, state: TradingState) -> float:
+        if state.traderData == '':
+            return 10000
+        elif state.traderData.count(';') == 0:
+            return 10000
+        else:
+            past_week: List[float] = [float(x) for x in state.traderData.split(';')]
+            mid = mean(past_week)
+            var = variance(past_week)
+            position = state.position.get(product,0)
+            gamma = 1e-3
+            tprop = 0.95
+            return mid-var*position*gamma*tprop
     
     def run(self, state: TradingState):
         result = {}
@@ -16,24 +27,27 @@ class Trader:
         best_bid, best_bid_amount = list(state.order_depths["RAINFOREST_RESIN"].buy_orders.items())[0]
         orders: List[Order] = []
         # just around right these values def need adjusting -- find through AS
-        # MAX_ASK = 9999
-        # MIN_BID = 10001
-        # if int(best_ask) < MAX_ASK:
-        #     orders.append(Order("RAINFOREST_RESIN", best_ask, -best_ask_amount))
-        #     print("BUYING " + str(-best_ask_amount) + " SHARES AT ", best_ask)
-        # if int(best_bid) > MIN_BID:
-        #     orders.append(Order("RAINFOREST_RESIN", best_bid, -best_bid_amount))
-        #     print("SELLING " + str(-best_bid_amount) + " SHARES AT ", best_bid)
-        orders.append(Order("RAINFOREST_RESIN", 9998, 25))
-        orders.append(Order("RAINFOREST_RESIN", 10002, -25))
+        res = self.find_reservation('RAINFOREST_RESIN',state)
+        max_ask = round(res)
+        min_bid = round(res)
+        print(res)
+        print(state.traderData)
+        if int(best_ask) < max_ask:
+            orders.append(Order("RAINFOREST_RESIN", best_ask, -best_ask_amount))
+
+        if int(best_bid) > min_bid:
+            orders.append(Order("RAINFOREST_RESIN", best_bid, -best_bid_amount))
+
         result["RAINFOREST_RESIN"] = orders
+
         traderData = state.traderData
-        '''
-        result["RAINFOREST_RESIN"] = orders
-        traderData = state.traderData
-        if traderData.count(';') < 4:
-            traderData += ';' + str()'
-        '''
-        print(str(state.market_trades))
+        if traderData == '':
+            traderData = str((best_ask+best_bid)/2)
+        elif traderData.count(';') < 3:
+            traderData += ';' + str((best_ask+best_bid)/2)
+        else:
+            traderData = traderData[traderData.find(';')+1:]
+            traderData += ';' + str((best_ask+best_bid)/2)
+
         conversions = None
         return result, conversions, traderData
