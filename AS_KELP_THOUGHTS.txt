@@ -1,0 +1,3 @@
+store past vals in dict
+dict -> json -> traderData
+start of each call can unpack json into dict
