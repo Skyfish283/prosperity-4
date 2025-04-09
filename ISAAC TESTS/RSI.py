@@ -1,82 +1,71 @@
-# from datamodel import *
-# from typing import List
-# import string
-# from statistics import *
-# import math
-# import json
+from datamodel import *
+from typing import List
+import string
+from statistics import *
+import math
+import json
 
-# class Trader:
+class Trader:
 
-#     # we want to implement AS market making
-#     def find_reservation_and_spread(self, product: Product, state: TradingState, past_week: List[float]) -> List[float]:
-#         if past_week == []:
-#             return [-1,-1]
-#         elif len(past_week) == 1:
-#             return past_week[0],1
-#         else:
-#             mid = mean(past_week)
-#             var = variance(past_week)
-#             position = state.position.get(product,0)
-#             gamma = 1e-4
-#             tprop = 0.95
-#             k = math.log(2)/0.01
+    # we want to implement AS market making
+    def find_reservation_and_spread(self, product: Product, state: TradingState, past_week: List[float]) -> List[float]:
+        if past_week == []:
+            return [-1,-1]
+        elif len(past_week) == 1:
+            return past_week[0],1
+        else:
+            mid = mean(past_week)
+            var = variance(past_week)
+            position = state.position.get(product,0)
+            gamma = 1e-4
+            tprop = 0.95
+            k = math.log(2)/0.01
             
-#             return mid-var*position*gamma*tprop, 2/gamma*math.log(1+gamma/k)+gamma*var
+            return mid-var*position*gamma*tprop, 2/gamma*math.log(1+gamma/k)+gamma*var
     
-#     def run(self, state: TradingState):
-#         result = {}
+    def run(self, state: TradingState):
+        result = {}
 
-#         data = {"runningup": [12312],
-#                 "runningdown": 213
-#                 "prevmid": 
-#                 }
+        if state.traderData == "":
+            data : Dict[str,Dict[str,List[float]]] = {}
+        else:
+            data : Dict[str,Dict[str,List[float]]] = json.loads(state.traderData)
 
-#         if state.traderData == "":
-#             data : Dict[str,List[float]] = {}
-#         else:
-#             data : Dict[str,List[float]] = json.loads(state.traderData)
+        products = ['SQUID_INK']
 
-#         products = ['RAINFOREST_RESIN']
+        for product in products:
+            best_ask, best_ask_amount = list(state.order_depths[product].sell_orders.items())[0]
+            best_bid, best_bid_amount = list(state.order_depths[product].buy_orders.items())[0]
 
-#         for product in products:
-#             best_ask, best_ask_amount = list(state.order_depths[product].sell_orders.items())[0]
-#             best_bid, best_bid_amount = list(state.order_depths[product].buy_orders.items())[0]
+            if data.get(product, {}) == {}:
+                data[product] = {"prev_mid": [(best_ask+best_bid)/2],"past_up":[],"past_down":[]}
+            else:
+                if data[product]["prev_mid"] > (best_ask+best_bid)/2:
+                    data[product]["past_up"].append((best_ask+best_bid)/2-data[product]["prev_mid"])
+                elif data[product]["prev_mid"] < (best_ask+best_bid)/2:
+                    data[product]["past_down"].append(-((best_ask+best_bid)/2-data[product]["prev_mid"]))
+                
+                if len(data[product]["past_up"]) > 14:
+                    del data[product]["past_up"][0]
+                if len(data[product]["past_down"]) > 14:
+                    del data[product]["past_down"][0]
+                rsi = 100-(100 / (1 + mean(data[product]["past_up"]) / mean(data[product]["past_down"]) ) )
 
-#             if data.get(product, []) == []:
-#                 data[product] = [(best_ask+best_bid)/2]
-#             else:
-#                 data[product].append((best_ask+best_bid)/2)
+            
 
-#             if (len(data[product]) > 14):
-#                 del data[product][0]
+            if int(best_ask) <= max_ask:
 
-#             orders: List[Order] = []
-#             # just around right these values def need adjusting -- find through AS
-#             res, spread = self.find_reservation_and_spread(product,state,data[product])
+                orders.append(Order(product, best_ask, -best_ask_amount))
 
-#             if (res == -1):
-#                 res = (best_ask+best_bid)/2
-#                 spread = 1
+            if int(best_bid) >= min_bid:
 
-#             spread = min(spread,1)
-#             max_ask = round(res-spread)
-#             min_bid = round(res+spread)
+                orders.append(Order(product, best_bid, -best_bid_amount))
 
-#             # print(res)
-#             # print(state.traderData)
-#             if int(best_ask) <= max_ask:
+            result[product] = orders
 
-#                 orders.append(Order(product, best_ask, -best_ask_amount))
+        traderData = json.dumps(data)
 
-#             if int(best_bid) >= min_bid:
+        print(state.toJSON())
 
-#                 orders.append(Order(product, best_bid, -best_bid_amount))
-
-#             result[product] = orders
-
-#         traderData = json.dumps(data)
-
-#         print(state.toJSON())
-
-#         conversions = None
-#         return result, conversions, traderData
+        conversions = None
+        return result, conversions, traderData
