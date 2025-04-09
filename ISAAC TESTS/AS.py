@@ -17,9 +17,8 @@ class Trader:
             var = variance(past_week)
             position = state.position.get(product,0)
             gamma = 1e-3
-            tprop = 0.95
             
-            return mid-var*position*gamma*tprop, 
+            return mid-var*position*gamma, 
     
     def run(self, state: TradingState):
         result = {}

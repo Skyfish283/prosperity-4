@@ -57,6 +57,8 @@ class Trader:
             max_ask = round(res-spread)
             min_bid = round(res+spread)
 
+            
+
             # print(res)
             # print(state.traderData)
             if int(best_ask) <= max_ask:
@@ -71,7 +73,7 @@ class Trader:
 
         traderData = json.dumps(data)
 
-        print(state.toJSON())
+        print(state.position)
 
         conversions = None
         return result, conversions, traderData
