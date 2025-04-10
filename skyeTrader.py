@@ -2,7 +2,7 @@ from datamodel import *
 from typing import *
 import string
 from statistics import *
-
+import json
 class Logger:
     def __init__(self) -> None:
         self.logs = ""
@@ -118,38 +118,94 @@ class Logger:
 
 
 logger = Logger()
-
 class Trader:
-
-    # we want to implement AS market making
-    def find_reservation(state: TradingState) -> int:
-        return 0
     
     def run(self, state: TradingState):
+        # print internal state and market info
+        #print("traderData: " + state.traderData)
+        #print("Observations: " + str(state.observations))
+        #dictionary to store orders for each product
         result = {}
 
-        best_ask, best_ask_amount = list(state.order_depths["RAINFOREST_RESIN"].sell_orders.items())[0]
-        best_bid, best_bid_amount = list(state.order_depths["RAINFOREST_RESIN"].buy_orders.items())[0]
-        orders: List[Order] = []
-        # just around right these values def need adjusting -- find through AS
-        # MAX_ASK = 9999
-        # MIN_BID = 10001
-        # if int(best_ask) < MAX_ASK:
-        #     orders.append(Order("RAINFOREST_RESIN", best_ask, -best_ask_amount))
-        #     print("BUYING " + str(-best_ask_amount) + " SHARES AT ", best_ask)
-        # if int(best_bid) > MIN_BID:
-        #     orders.append(Order("RAINFOREST_RESIN", best_bid, -best_bid_amount))
-        #     print("SELLING " + str(-best_bid_amount) + " SHARES AT ", best_bid)
-        orders.append(Order("RAINFOREST_RESIN", 9998, 25))
-        orders.append(Order("RAINFOREST_RESIN", 10002, -25))
-        result["RAINFOREST_RESIN"] = orders
-        traderData = state.traderData
-        '''
-        result["RAINFOREST_RESIN"] = orders
-        traderData = state.traderData
-        if traderData.count(';') < 4:
-            traderData += ';' + str()'
-        '''
+        #use historic data
+        max_past_data = 1000
+
+        try:
+            past_data = json.loads(state.traderData)
+        except:
+            past_data = {}
+        finally:
+            print("data retrieved from traderdata. ")
+
+        for product in state.order_depths:
+            order_depth: OrderDepth = state.order_depths[product]
+            orders: List[Order] = []
+
+            if len(order_depth.sell_orders)== 0 or len(order_depth.buy_orders) == 0:
+                result[product] = orders#if no sell or no buy--> no trading
+                continue
+
+            buy_orders = order_depth.buy_orders
+            sell_orders = order_depth.sell_orders
+
+            #print("Buy Order depth : " + str(len(order_depth.buy_orders)) + ", Sell order depth : " + str(len(order_depth.sell_orders)))
+            
+            # calculate acceptable price
+            best_ask, best_ask_amount = list(order_depth.sell_orders.items())[0]
+            best_bid, best_bid_amount = list(order_depth.buy_orders.items())[0]
+
+            spread = best_ask - best_bid
+            mid_price = (best_ask+best_bid)/2
+
+            #update past data
+            past_prices = past_data.get(product, [])
+            if past_prices == []:
+                past_data[product]= []
+            past_data[product].append(mid_price)
+            past_prices.append(mid_price)
+            if len(past_prices) > max_past_data:
+                past_prices = past_prices[-max_past_data:] #control under max data size
+                past_data[product] = past_prices
+            
+
+            max_position = 50
+            pos = state.position.get(product, 0) #get the position for current product
+
+            
+            if len(past_prices)> 1:
+                voltatility = stdev(past_prices)
+                mean_price = mean(past_prices)
+            else:
+                voltatility = 1
+                mean_price = past_prices[0]
+                
+
+            #inventory aware pricing: owning (long) or short
+            skew = pos/max_position * 5
+            acceptable_buy = mean_price-voltatility - skew #if skew>0, more eager to sell, if skew<0 more eager to buy
+            acceptable_sell = mean_price+voltatility - skew 
+            logger.print("Acceptable buy : " + str(acceptable_buy) + ", Acceptable sell : "+str(acceptable_sell))
+            
+            #buying opportunities
+            if best_ask <= acceptable_buy:
+                volume = min(-sell_orders[best_ask], max_position - pos)
+                if volume > 0:
+                    logger.print("BUY", str(-volume) + "x", best_ask)
+                    orders.append(Order(product, best_ask, volume))
+                    pos += volume
+            
+            #selling opportunities
+            if best_bid >= acceptable_sell:
+                volume = min(buy_orders[best_bid], max_position + pos)
+                if volume > 0:
+                    logger.print("SELL", str(volume) + "x", best_bid)
+                    orders.append(Order(product, best_bid, -volume))
+                    pos -= volume   
+            result[product] = orders
+    
+    
+        traderData = json.dumps(past_data) # String value holding Trader state data required. It will be delivered as TradingState.traderData on next execution.
+        
+        conversions = 0
         logger.flush(state,result,None,traderData)
-        conversions = None
         return result, conversions, traderData
