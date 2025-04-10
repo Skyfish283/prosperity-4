@@ -1,13 +1,32 @@
 from datamodel import *
-from typing import List
+from typing import *
 import string
 from statistics import *
 import math
 import json
+from collections import deque
 
 class Trader:
-    def ave(self, product: str, data : List[float]):
-        return mean(data)
+    def track_extremes(self, product: str, state: TradingState, data: Dict[str,Dict[str,Any]]):
+        asks = list(state.order_depths[product].buy_orders.items())
+        bids = list(state.order_depths[product].sell_orders.items())
+        mid = (asks[0][0] - bids[0][0])/2
+        if data == {}:
+            data[product]["last_price"] = mid
+            data[product]["diffs"] = deque()
+            data[product]["extremes"] = deque()
+        else:
+            data[product]["diffs"].append(mid-data[product]["last_price"])
+            if len(data[product]["diffs"]) > 5:
+                data[product]["diffs"].popleft()
+            up = 0
+            down = 0
+            for diff in data[product]["diffs"]:
+                if diff < 0:
+                    down += 1
+                elif diff>0:
+                    up += 1
+            
 
     
     def run(self, state: TradingState):
@@ -18,42 +37,9 @@ class Trader:
         else:
             data : Dict[str,Dict[str,List[float]]] = json.loads(state.traderData)
 
-        products = ['SQUID_INK']
+        product = 'SQUID_INK'
 
-        for product in products:
-            best_ask, best_ask_amount = list(state.order_depths[product].sell_orders.items())[0]
-            best_bid, best_bid_amount = list(state.order_depths[product].buy_orders.items())[0]
-
-            if data.get(product, []) == []:
-                data[product]["past_week"] = [(best_ask+best_bid)/2]
-            else:
-                data[product]["past_week"].append((best_ask+best_bid)/2)
-
-            if (len(data[product]) > 14):
-                del data[product][0]
-
-            orders: List[Order] = []
-            # just around right these values def need adjusting -- find through AS
-            res, spread = self.find_reservation_and_spread(product,state,data[product]["past_week"])
-
-            if (res == -1):
-                res = (best_ask+best_bid)/2
-                spread = 1
-
-            spread = min(spread,1)
-            max_ask = round(res-spread)
-            min_bid = round(res+spread)
-
-            # print(res)
-            # print(state.traderData)
-            if state.position > 0:
-                orders.append()
-
-            if int(best_bid) >= min_bid:
-
-                orders.append(Order(product, best_bid, -best_bid_amount))
-
-            result[product] = orders
+        self.track_extremes(state, data)
 
         traderData = json.dumps(data)
 
