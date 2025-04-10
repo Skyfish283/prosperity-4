@@ -15,6 +15,7 @@ class Trader:
             data[product]["last_price"] = mid
             data[product]["diffs"] = deque()
             data[product]["extremes"] = deque()
+            data[product]["dir"] = 0
         else:
             data[product]["diffs"].append(mid-data[product]["last_price"])
             if len(data[product]["diffs"]) > 5:
@@ -26,6 +27,13 @@ class Trader:
                     down += 1
                 elif diff>0:
                     up += 1
+            
+            if up > down:
+                if data[product]["dir"] != 1:
+                    data[product]["extremes"].append(mid)
+                else:
+                    data[product]["extremes"]
+                    
             
 
     
