@@ -165,23 +165,23 @@ class SquidInkStrategy(MarketMakingStrategy):
         # if(in decrease region):
         #     mid_price favours toward buy
         # return 2000
-        max_position = 50
-        pos = state.position.get(product, 0) #get the position for current product
+        # max_position = 50
+        # pos = state.position.get(product, 0) #get the position for current product
 
             
-        if len(past_prices)> 1:
-            voltatility = stdev(past_prices)
-            mean_price = mean(past_prices)
-        else:
-            voltatility = 1
-            mean_price = past_prices[0]
+        # if len(past_prices)> 1:
+        #     voltatility = stdev(past_prices)
+        #     mean_price = mean(past_prices)
+        # else:
+        #     voltatility = 1
+        #     mean_price = past_prices[0]
                 
 
-        #inventory aware pricing: owning (long) or short
-        skew = pos/max_position * 5
-        acceptable_buy = mean_price-voltatility - skew #if skew>0, more eager to sell, if skew<0 more eager to buy
-        acceptable_sell = mean_price+voltatility - skew 
-        order_depth = state.order_depths[self.symbol]
+        # #inventory aware pricing: owning (long) or short
+        # skew = pos/max_position * 5
+        # acceptable_buy = mean_price-voltatility - skew #if skew>0, more eager to sell, if skew<0 more eager to buy
+        # acceptable_sell = mean_price+voltatility - skew 
+        # order_depth = state.order_depths[self.symbol]
         buy_orders = sorted(order_depth.buy_orders.items(), reverse=True) #highest to lowest
         sell_orders = sorted(order_depth.sell_orders.items())#lowest to highest
 
