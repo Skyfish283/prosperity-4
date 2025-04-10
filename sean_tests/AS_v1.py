@@ -79,3 +79,4 @@ class Trader:
         traderData = jsonpickle.encode(tempdata)
         conversions = None
         return result, conversions, traderData
+        
