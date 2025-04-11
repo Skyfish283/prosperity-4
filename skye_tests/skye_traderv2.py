@@ -93,7 +93,7 @@ class MarketMakingStrategy(Strategy):
 
         # Fallback buy actions if inventory is too empty
         if to_buy > 0 and hard_liquidate:
-            self.buy(true_value, to_buy // 2)
+            self.buy(true_value, to_buy // 2)#floor division
             to_buy -= to_buy // 2
 
         if to_buy > 0 and soft_liquidate:
@@ -134,7 +134,7 @@ class MarketMakingStrategy(Strategy):
 
     def load(self, data) -> None:
         # Restore the liquidation window from saved state
-        self.window = deque(data)
+        self.window = deque(data[0])
 
 
 # Strategy for resin: assumes a fixed fair value
@@ -157,38 +157,17 @@ class KelpStrategy(MarketMakingStrategy):
 
 # Strategy for Squid Ink: ********
 class SquidInkStrategy(MarketMakingStrategy):
-    # def trendCheck()
+    def increaseCheck(self)->bool:
+        increase = True
+        return increase
     def get_true_value(self, state: TradingState) -> int:
-        # mid_price =0
-        # if(in increase region):
-        #     mid_price being favored towards sell
-        # if(in decrease region):
-        #     mid_price favours toward buy
-        # return 2000
-        # max_position = 50
-        # pos = state.position.get(product, 0) #get the position for current product
-
-            
-        # if len(past_prices)> 1:
-        #     voltatility = stdev(past_prices)
-        #     mean_price = mean(past_prices)
-        # else:
-        #     voltatility = 1
-        #     mean_price = past_prices[0]
-                
-
-        # #inventory aware pricing: owning (long) or short
-        # skew = pos/max_position * 5
-        # acceptable_buy = mean_price-voltatility - skew #if skew>0, more eager to sell, if skew<0 more eager to buy
-        # acceptable_sell = mean_price+voltatility - skew 
-        # order_depth = state.order_depths[self.symbol]
+        order_depth = state.order_depths[self.symbol]
         buy_orders = sorted(order_depth.buy_orders.items(), reverse=True) #highest to lowest
         sell_orders = sorted(order_depth.sell_orders.items())#lowest to highest
 
         popular_buy_price = max(buy_orders, key=lambda tup: tup[1])[0] #find the maximum based on volume
         popular_sell_price = min(sell_orders, key=lambda tup: tup[1])[0]
-
-        return round((popular_buy_price + popular_sell_price) / 2)  # Mid-price
+        return round((popular_buy_price + popular_sell_price) / 2)+1 if self.increaseCheck()==True else round((popular_buy_price + popular_sell_price) / 2)-1 # Mid-price
 
 
 # Main trader class that coordinates multiple strategies
@@ -214,22 +193,34 @@ class Trader:
 
         # Load previously saved strategy data
         old_trader_data = json.loads(state.traderData) if state.traderData != "" else {}
-        new_trader_data = {}
+        new_trader_data = []#list of two dictionaries: window and past data
 
         orders = {}
         for symbol, strategy in self.strategies.items():
-            if symbol in old_trader_data:
-                strategy.load(old_trader_data.get(symbol, None))
+            if symbol in old_trader_data[0]:
+                strategy.load(old_trader_data[0].get(symbol, None))
 
             # Run strategy for each symbol if order book is available
             if symbol in state.order_depths:
-                orders[symbol] = strategy.run(state)
+                #update past data if squid ink
+                if symbol == "SQUID_INK":
+                    past_prices = old_trader_data[1].get(symbol, [])
+                    if past_prices == []:
+                        old_trader_data[1][symbol]= []
+                    best_ask, best_ask_amount = list(state.order_depth.sell_orders.items())[0]
+                    best_bid, best_bid_amount = list(state.order_depth.buy_orders.items())[0]
+                    old_trader_data[1][symbol].append((best_ask+best_bid)/2)
+                    max_past_data = 10
+                    if len(past_prices) > max_past_data:
+                        past_prices = past_prices[-max_past_data:] #control under max data size
+                        old_trader_data[1][symbol] = past_prices
+                    orders[symbol] = strategy.run(state)
 
-            new_trader_data[symbol] = strategy.save()
+            new_trader_data[0][symbol] = strategy.save()
+            new_trader_data[1] =  old_trader_data[1]
 
         # Serialize internal state for next run
         trader_data = json.dumps(new_trader_data, separators=(",", ":"))
 
-        # Flush logs and return decisions
         # logger.flush(state, orders, conversions, trader_data)
         return orders, conversions, trader_data
