@@ -184,8 +184,8 @@ class DifferenceStrategy(Strategy):
             self.force_sell(state, state.position.get(self.symbol,0))
         elif state.position.get(self.symbol,0) < 0:
             self.force_buy(state, -state.position.get(self.symbol,0))
-    
-    def act(self, state: TradingState) -> None:
+
+    def find_diff(self, state: TradingState) -> float:
         real_price = 0
         for product, weight in self.related_product_weights.items():
             p_asks = list(state.order_depths[product].sell_orders.items())
@@ -196,14 +196,17 @@ class DifferenceStrategy(Strategy):
         group_bids = list(state.order_depths[self.symbol].buy_orders.items())
         mid_price = (group_asks[0][0] + group_bids[0][0]) / 2
         
-        diff = real_price - mid_price
+        return real_price - mid_price
 
-        logger.print("DIFF", diff, "REAL PRICE", real_price, "MID PRICE", mid_price, "LIMIT", self.limit, "POSITION", state.position.get(self.symbol,0))
+    
+    def act(self, state: TradingState) -> None:
+        
+        diff = self.find_diff(state)
 
         if diff > 100:
             quantity = min(self.limit, self.limit-state.position.get(self.symbol,0))
             self.force_buy(state, quantity)
-        elif diff < -100:
+        elif diff < -50:
             quantity = min(self.limit, self.limit+state.position.get(self.symbol,0))
             self.force_sell(state, quantity)
         elif abs(diff) < 10:
@@ -215,6 +218,13 @@ class PicnicBasket1Strategy(DifferenceStrategy):
             "CROISSANTS": 6,
             "JAMS": 3,
             "DJEMBES": 1
+        })
+
+class PicnicBasket2Strategy(DifferenceStrategy):
+    def __init__(self, symbol: str, limit: int) -> None:
+        super().__init__(symbol, limit, {
+            "CROISSANTS": 4,
+            "JAMS": 2,
         })
 
 # Main trader class that coordinates multiple strategies
@@ -236,6 +246,7 @@ class Trader:
             symbol: strat(symbol, limits[symbol]) 
             for symbol, strat in {
                 "PICNIC_BASKET1": PicnicBasket1Strategy,
+                # "PICNIC_BASKET2": PicnicBasket2Strategy,
             }.items()
         }
   
