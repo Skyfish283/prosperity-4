@@ -1,7 +1,7 @@
 import json
 from abc import abstractmethod
 from collections import deque
-from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
+from datamodel import *
 from typing import *
 import pandas as pd
 
@@ -374,6 +374,84 @@ class KelpStrategy(MarketMakingStrategy):
 
         return round((popular_buy_price + popular_sell_price) / 2)  # Mid-price
 
+class JamStrategy(MACD):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol,limit,100)
+class CroissantStrategy(MarketMakingStrategy):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol,limit,100)
+class DjembeStrategy(MACD):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol,limit,100)
+weight = int
+class DifferenceStrategy(Strategy):
+    def __init__(self, symbol: str, limit: int, related_product_weights: Dict[Product,weight]) -> None:
+        super().__init__(symbol, limit)
+        self.related_product_weights = related_product_weights
+    
+    def force_buy(self, state : TradingState, quantity: int) -> None:
+        ## BUY QUANTITY REGARDLESS OF PRICE (quantity is positive)
+        for ask, vol in list(state.order_depths[self.symbol].sell_orders.items()):
+            self.buy(ask, min(-vol, quantity))
+            quantity -= min(-vol, quantity)
+            if quantity <= 0:
+                return
+
+    def force_sell(self, state: TradingState, quantity: int) -> None:
+        ## SELL QUANTITY REGARDLESS OF PRICE (quantity is positive)
+        logger.print("FORCE SELLING", quantity, "of", self.symbol)
+        for bid, vol in list(state.order_depths[self.symbol].buy_orders.items()):
+            self.sell(bid, min(vol, quantity))
+            quantity -= min(vol, quantity)
+            if quantity <= 0:
+                return
+            
+    def zero_position(self, state: TradingState) -> None:
+        if state.position.get(self.symbol,0) > 0:
+            self.force_sell(state, state.position.get(self.symbol,0))
+        elif state.position.get(self.symbol,0) < 0:
+            self.force_buy(state, -state.position.get(self.symbol,0))
+    
+    def act(self, state: TradingState) -> None:
+        real_price = 0
+        for product, weight in self.related_product_weights.items():
+            p_asks = list(state.order_depths[product].sell_orders.items())
+            p_bids = list(state.order_depths[product].buy_orders.items())
+            real_price += (p_asks[0][0] + p_bids[0][0]) / 2 * weight
+
+        group_asks = list(state.order_depths[self.symbol].sell_orders.items())
+        group_bids = list(state.order_depths[self.symbol].buy_orders.items())
+        mid_price = (group_asks[0][0] + group_bids[0][0]) / 2
+        
+        diff = real_price - mid_price
+
+        logger.print("DIFF", diff, "REAL PRICE", real_price, "MID PRICE", mid_price, "LIMIT", self.limit, "POSITION", state.position.get(self.symbol,0))
+
+        if diff > 98:
+            quantity = min(self.limit, self.limit-state.position.get(self.symbol,0))
+            self.force_buy(state, quantity)
+        elif diff < -56:
+            quantity = min(self.limit, self.limit+state.position.get(self.symbol,0))
+            self.force_sell(state, quantity)
+        elif abs(diff) < 9:
+            self.zero_position(state)
+
+class PicnicBasket1Strategy(DifferenceStrategy):
+    def __init__(self, symbol: str, limit: int) -> None:
+        super().__init__(symbol, limit, {
+            "CROISSANTS": 6,
+            "JAMS": 3,
+            "DJEMBES": 1
+        })
+
+class PicnicBasket2Strategy(DifferenceStrategy):
+    def __init__(self, symbol: str, limit: int) -> None:
+        super().__init__(symbol, limit, {
+            "CROISSANTS": 4,
+            "JAMS": 2
+        })
+
+
 
 
 # Main trader class that coordinates multiple strategies
@@ -383,9 +461,9 @@ class Trader:
             "RAINFOREST_RESIN": 50,
             "KELP": 50,
             "SQUID_INK": 50,
-            "CROISSANT": 250,
-            "JAM": 350,
-            "DJEMBE": 60,
+            "CROISSANTS": 250,
+            "JAMS": 350,
+            "DJEMBES": 60,
             "PICNIC_BASKET1": 60,
             "PICNIC_BASKET2": 100
         }
@@ -396,7 +474,13 @@ class Trader:
             for symbol, clazz in {
                 "RAINFOREST_RESIN": ResinStrategy,
                 "KELP": KelpStrategy,
-                "SQUID_INK": SquidStrategy
+                "SQUID_INK": SquidStrategy,
+                "PICNIC_BASKET1": PicnicBasket1Strategy,
+                "PICNIC_BASKET2": PicnicBasket2Strategy,
+                "JAMS": JamStrategy,
+                # "CROISSANTS": KelpStrategy,
+                # "DJEMBES": KelpStrategy
+
             }.items()
         }
 

@@ -196,20 +196,17 @@ class DifferenceStrategy(Strategy):
         group_bids = list(state.order_depths[self.symbol].buy_orders.items())
         mid_price = (group_asks[0][0] + group_bids[0][0]) / 2
         
-        return real_price - mid_price
+        diff = real_price - mid_price
 
-    
-    def act(self, state: TradingState) -> None:
-        
-        diff = self.find_diff(state)
+        logger.print("DIFF", diff, "REAL PRICE", real_price, "MID PRICE", mid_price, "LIMIT", self.limit, "POSITION", state.position.get(self.symbol,0))
 
-        if diff > 100:
+        if diff > 98:
             quantity = min(self.limit, self.limit-state.position.get(self.symbol,0))
             self.force_buy(state, quantity)
-        elif diff < -50:
+        elif diff < -56:
             quantity = min(self.limit, self.limit+state.position.get(self.symbol,0))
             self.force_sell(state, quantity)
-        elif abs(diff) < 10:
+        elif abs(diff) < 9:
             self.zero_position(state)
 
 class PicnicBasket1Strategy(DifferenceStrategy):
@@ -225,6 +222,13 @@ class PicnicBasket2Strategy(DifferenceStrategy):
         super().__init__(symbol, limit, {
             "CROISSANTS": 4,
             "JAMS": 2,
+        })
+
+class PicnicBasket2Strategy(DifferenceStrategy):
+    def __init__(self, symbol: str, limit: int) -> None:
+        super().__init__(symbol, limit, {
+            "CROISSANTS": 4,
+            "JAMS": 2
         })
 
 # Main trader class that coordinates multiple strategies
@@ -246,7 +250,7 @@ class Trader:
             symbol: strat(symbol, limits[symbol]) 
             for symbol, strat in {
                 "PICNIC_BASKET1": PicnicBasket1Strategy,
-                # "PICNIC_BASKET2": PicnicBasket2Strategy,
+                "PICNIC_BASKET2": PicnicBasket2Strategy
             }.items()
         }
   
