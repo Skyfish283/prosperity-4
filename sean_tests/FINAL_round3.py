@@ -1,14 +1,132 @@
 import json
 from abc import abstractmethod
 from collections import deque
-from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
+from datamodel import *
 from typing import *
 from statistics import *
 import pandas as pd
 import numpy as np
 import math
 
+
 MACDsignals = List[int]
+
+class Logger:
+    def __init__(self) -> None:
+        self.logs = ""
+        self.max_log_length = 3750
+
+    def print(self, *objects: Any, sep: str = " ", end: str = "\n") -> None:
+        self.logs += sep.join(map(str, objects)) + end
+
+    def flush(self, state: TradingState, orders: dict[Symbol, list[Order]], conversions: int, trader_data: str) -> None:
+        base_length = len(
+            self.to_json(
+                [
+                    self.compress_state(state, ""),
+                    self.compress_orders(orders),
+                    conversions,
+                    "",
+                    "",
+                ]
+            )
+        )
+
+        # We truncate state.traderData, trader_data, and self.logs to the same max. length to fit the log limit
+        max_item_length = (self.max_log_length - base_length) // 3
+
+        print(
+            self.to_json(
+                [
+                    self.compress_state(state, self.truncate(state.traderData, max_item_length)),
+                    self.compress_orders(orders),
+                    conversions,
+                    self.truncate(trader_data, max_item_length),
+                    self.truncate(self.logs, max_item_length),
+                ]
+            )
+        )
+
+        self.logs = ""
+
+    def compress_state(self, state: TradingState, trader_data: str) -> list[Any]:
+        return [
+            state.timestamp,
+            trader_data,
+            self.compress_listings(state.listings),
+            self.compress_order_depths(state.order_depths),
+            self.compress_trades(state.own_trades),
+            self.compress_trades(state.market_trades),
+            state.position,
+            self.compress_observations(state.observations),
+        ]
+
+    def compress_listings(self, listings: dict[Symbol, Listing]) -> list[list[Any]]:
+        compressed = []
+        for listing in listings.values():
+            compressed.append([listing.symbol, listing.product, listing.denomination])
+
+        return compressed
+
+    def compress_order_depths(self, order_depths: dict[Symbol, OrderDepth]) -> dict[Symbol, list[Any]]:
+        compressed = {}
+        for symbol, order_depth in order_depths.items():
+            compressed[symbol] = [order_depth.buy_orders, order_depth.sell_orders]
+
+        return compressed
+
+    def compress_trades(self, trades: dict[Symbol, list[Trade]]) -> list[list[Any]]:
+        compressed = []
+        for arr in trades.values():
+            for trade in arr:
+                compressed.append(
+                    [
+                        trade.symbol,
+                        trade.price,
+                        trade.quantity,
+                        trade.buyer,
+                        trade.seller,
+                        trade.timestamp,
+                    ]
+                )
+
+        return compressed
+
+    def compress_observations(self, observations: Observation) -> list[Any]:
+        conversion_observations = {}
+        for product, observation in observations.conversionObservations.items():
+            conversion_observations[product] = [
+                observation.bidPrice,
+                observation.askPrice,
+                observation.transportFees,
+                observation.exportTariff,
+                observation.importTariff,
+                observation.sugarPrice,
+                observation.sunlightIndex,
+            ]
+
+        return [observations.plainValueObservations, conversion_observations]
+
+    def compress_orders(self, orders: dict[Symbol, list[Order]]) -> list[list[Any]]:
+        compressed = []
+        for arr in orders.values():
+            for order in arr:
+                compressed.append([order.symbol, order.price, order.quantity])
+
+        return compressed
+
+    def to_json(self, value: Any) -> str:
+        return json.dumps(value, cls=ProsperityEncoder, separators=(",", ":"))
+
+    def truncate(self, value: str, max_length: int) -> str:
+        if len(value) <= max_length:
+            return value
+
+        return value[: max_length - 3] + "..."
+
+
+logger = Logger()
+
 
 class Strategy:
     def __init__(self, symbol: str, limit: int) -> None:
@@ -248,7 +366,7 @@ class ResinStrategy(MarketMakingStrategy):
         return 10_000  # Assumes constant fair value
 
 
-# Strategy for Kelp: calculates fair value based on market depth
+# Strategy for STARFRUIT: calculates fair value based on market depth
 class KelpStrategy(MarketMakingStrategy):
     def get_true_value(self, state: TradingState) -> int:
         order_depth = state.order_depths[self.symbol]
@@ -259,6 +377,69 @@ class KelpStrategy(MarketMakingStrategy):
         popular_sell_price = min(sell_orders, key=lambda tup: tup[1])[0]
 
         return round((popular_buy_price + popular_sell_price) / 2)  # Mid-price
+
+class JamStrategy(MACD):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol,limit,100)
+class CroissantStrategy(MarketMakingStrategy):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol,limit,100)
+class DjembeStrategy(MACD):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol,limit,100)
+
+weight = int
+class DifferenceStrategy(Strategy):
+    def __init__(self, symbol: str, limit: int, related_product_weights: Dict[Product,weight]) -> None:
+        super().__init__(symbol, limit)
+        self.related_product_weights = related_product_weights
+    
+    def force_buy(self, state : TradingState, quantity: int) -> None:
+        ## BUY QUANTITY REGARDLESS OF PRICE (quantity is positive)
+        for ask, vol in list(state.order_depths[self.symbol].sell_orders.items()):
+            self.buy(ask, min(-vol, quantity))
+            quantity -= min(-vol, quantity)
+            if quantity <= 0:
+                return
+
+    def force_sell(self, state: TradingState, quantity: int) -> None:
+        ## SELL QUANTITY REGARDLESS OF PRICE (quantity is positive)
+        logger.print("FORCE SELLING", quantity, "of", self.symbol)
+        for bid, vol in list(state.order_depths[self.symbol].buy_orders.items()):
+            self.sell(bid, min(vol, quantity))
+            quantity -= min(vol, quantity)
+            if quantity <= 0:
+                return
+            
+    def zero_position(self, state: TradingState) -> None:
+        if state.position.get(self.symbol,0) > 0:
+            self.force_sell(state, state.position.get(self.symbol,0))
+        elif state.position.get(self.symbol,0) < 0:
+            self.force_buy(state, -state.position.get(self.symbol,0))
+    
+    def act(self, state: TradingState) -> None:
+        real_price = 0
+        for product, weight in self.related_product_weights.items():
+            p_asks = list(state.order_depths[product].sell_orders.items())
+            p_bids = list(state.order_depths[product].buy_orders.items())
+            real_price += (p_asks[0][0] + p_bids[0][0]) / 2 * weight
+
+        group_asks = list(state.order_depths[self.symbol].sell_orders.items())
+        group_bids = list(state.order_depths[self.symbol].buy_orders.items())
+        mid_price = (group_asks[0][0] + group_bids[0][0]) / 2
+        
+        diff = real_price - mid_price
+
+        logger.print("DIFF", diff, "REAL PRICE", real_price, "MID PRICE", mid_price, "LIMIT", self.limit, "POSITION", state.position.get(self.symbol,0))
+
+        if diff > 98:
+            quantity = min(self.limit, self.limit-state.position.get(self.symbol,0))
+            self.force_buy(state, quantity)
+        elif diff < -56:
+            quantity = min(self.limit, self.limit+state.position.get(self.symbol,0))
+            self.force_sell(state, quantity)
+        elif abs(diff) < 9:
+            self.zero_position(state)
 
 class BlackScholesStrat(Strategy):
     def __init__(self, symbol: str, limit: int, strike: int, asset: str):
@@ -291,9 +472,9 @@ class BlackScholesStrat(Strategy):
             asset_log_returns = [math.log(asset_prices[i + 1] / asset_prices[i]) 
                                  for i in range(len(asset_prices) - 1)]
             volatility = stdev(asset_log_returns)
+        # logger.print(f"Current asset volatility: {volatility}")
         S = self.curr_price(state)
         K = self.strike
-        # T = 5 # 5 days from beginning of round 3 to expiry, 251 trading days in a year
         T = 5 - (state.timestamp // 1000000)
         r = 0  # risk-free interest rate, assumed to be 0
         d_plus : float = (math.log(S / K) + (r + volatility ** 2 / 2) * T) / (volatility * np.sqrt(T))
@@ -309,6 +490,7 @@ class BlackScholesStrat(Strategy):
             real_price = (best_ask + best_bid) / 2
         except IndexError:
             real_price = fair_price
+        # logger.print(f"Current fair price: {fair_price}, current actual price: {real_price}")
         diff = fair_price - real_price
 
         min_diff = 0
@@ -371,6 +553,22 @@ class VolcanicRockStrategy(MACD):
     def __init__(self, symbol: str, limit: int):
         super().__init__(symbol, limit, 100)
 
+
+class PicnicBasket1Strategy(DifferenceStrategy):
+    def __init__(self, symbol: str, limit: int) -> None:
+        super().__init__(symbol, limit, {
+            "CROISSANTS": 6,
+            "JAMS": 3,
+            "DJEMBES": 1
+        })
+
+class PicnicBasket2Strategy(DifferenceStrategy):
+    def __init__(self, symbol: str, limit: int) -> None:
+        super().__init__(symbol, limit, {
+            "CROISSANTS": 4,
+            "JAMS": 2
+        })
+
 # Main trader class that coordinates multiple strategies
 class Trader:
     def __init__(self) -> None:
@@ -378,9 +576,9 @@ class Trader:
             "RAINFOREST_RESIN": 50,
             "KELP": 50,
             "SQUID_INK": 50,
-            "CROISSANT": 250,
-            "JAM": 350,
-            "DJEMBE": 60,
+            "CROISSANTS": 250,
+            "JAMS": 350,
+            "DJEMBES": 60,
             "PICNIC_BASKET1": 60,
             "PICNIC_BASKET2": 100,
             "VOLCANIC_ROCK": 400,
@@ -388,23 +586,30 @@ class Trader:
             "VOLCANIC_ROCK_VOUCHER_9750" : 200,
             "VOLCANIC_ROCK_VOUCHER_10000" : 200,
             "VOLCANIC_ROCK_VOUCHER_10250" : 200,
-            "VOLCANIC_ROCK_VOUCHER_10500" : 200
+            "VOLCANIC_ROCK_VOUCHER_10500" : 200           
         }
 
         # Instantiate strategies for each symbol
         self.strategies = {
-            symbol: strat(symbol, limits[symbol]) 
-            for symbol, strat in {
-                 "VOLCANIC_ROCK_VOUCHER_9500": Volcanic9500Strat,
-                 "VOLCANIC_ROCK_VOUCHER_9750": Volcanic9750Strat,
-                 "VOLCANIC_ROCK_VOUCHER_10000": Volcanic10000Strat,
-                 "VOLCANIC_ROCK_VOUCHER_10250": Volcanic10250Strat,
-                 "VOLCANIC_ROCK_VOUCHER_10500": Volcanic10500Strat,
-                 "VOLCANIC_ROCK": VolcanicRockStrategy,
+            symbol: clazz(symbol, limits[symbol]) 
+            for symbol, clazz in {
+                "RAINFOREST_RESIN": ResinStrategy,
+                "KELP": KelpStrategy,
+                "SQUID_INK": SquidStrategy,
+                "PICNIC_BASKET1": PicnicBasket1Strategy,
+                "PICNIC_BASKET2": PicnicBasket2Strategy,
+                "JAMS": JamStrategy,
+                "VOLCANIC_ROCK_VOUCHER_9500": Volcanic9500Strat,
+                "VOLCANIC_ROCK_VOUCHER_9750": Volcanic9750Strat,
+                "VOLCANIC_ROCK_VOUCHER_10000": Volcanic10000Strat,
+                "VOLCANIC_ROCK_VOUCHER_10250": Volcanic10250Strat,
+                "VOLCANIC_ROCK_VOUCHER_10500": Volcanic10500Strat,
+                "VOLCANIC_ROCK": VolcanicRockStrategy
             }.items()
         }
-    
+
     def run(self, state: TradingState) -> tuple[dict[Symbol, list[Order]], int, str]:
+        # logger.print(state.position)  # Log current positions
 
         conversions = 0  # Unused here, placeholder for conversion tracking
 
@@ -426,5 +631,7 @@ class Trader:
 
 
         trader_data = json.dumps(new_trader_data, separators=(",", ":"))
+
+        logger.flush(state, result, conversions, trader_data)  # Flush logs to output
 
         return result, conversions, trader_data

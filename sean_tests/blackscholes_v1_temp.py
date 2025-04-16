@@ -484,6 +484,10 @@ class Volcanic10500Strat(BlackScholesStrat):
     def __init__(self, symbol: str, limit: int):
         super().__init__(symbol, limit, 10500, "VOLCANIC_ROCK")
 
+class VolcanicRockStrategy(MACD):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol, limit, 100)
+        
 # Main trader class that coordinates multiple strategies
 class Trader:
     def __init__(self) -> None:
@@ -496,7 +500,7 @@ class Trader:
             "DJEMBE": 60,
             "PICNIC_BASKET1": 60,
             "PICNIC_BASKET2": 100,
-            "VOLANIC_ROCK": 400,
+            "VOLCANIC_ROCK": 400,
             "VOLCANIC_ROCK_VOUCHER_9500": 200,
             "VOLCANIC_ROCK_VOUCHER_9750" : 200,
             "VOLCANIC_ROCK_VOUCHER_10000" : 200,
@@ -512,7 +516,8 @@ class Trader:
                 "VOLCANIC_ROCK_VOUCHER_9750": Volcanic9750Strat,
                 "VOLCANIC_ROCK_VOUCHER_10000": Volcanic10000Strat,
                 "VOLCANIC_ROCK_VOUCHER_10250": Volcanic10250Strat,
-                "VOLCANIC_ROCK_VOUCHER_10500": Volcanic10500Strat
+                "VOLCANIC_ROCK_VOUCHER_10500": Volcanic10500Strat,
+                "VOLCANIC_ROCK": VolcanicRockStrategy,
             }.items()
         }
     

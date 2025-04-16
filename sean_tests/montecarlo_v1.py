@@ -1,6 +1,7 @@
 import json
 from abc import abstractmethod
 from collections import deque
+from re import S
 from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 from typing import *
 from statistics import *
@@ -9,6 +10,121 @@ import numpy as np
 import math
 
 MACDsignals = List[int]
+
+class Logger:
+    def __init__(self) -> None:
+        self.logs = ""
+        self.max_log_length = 3750
+
+    def print(self, *objects: Any, sep: str = " ", end: str = "\n") -> None:
+        self.logs += sep.join(map(str, objects)) + end
+
+    def flush(self, state: TradingState, orders: dict[Symbol, list[Order]], conversions: int, trader_data: str) -> None:
+        base_length = len(
+            self.to_json(
+                [
+                    self.compress_state(state, ""),
+                    self.compress_orders(orders),
+                    conversions,
+                    "",
+                    "",
+                ]
+            )
+        )
+
+        # We truncate state.traderData, trader_data, and self.logs to the same max. length to fit the log limit
+        max_item_length = (self.max_log_length - base_length) // 3
+
+        print(
+            self.to_json(
+                [
+                    self.compress_state(state, self.truncate(state.traderData, max_item_length)),
+                    self.compress_orders(orders),
+                    conversions,
+                    self.truncate(trader_data, max_item_length),
+                    self.truncate(self.logs, max_item_length),
+                ]
+            )
+        )
+
+        self.logs = ""
+
+    def compress_state(self, state: TradingState, trader_data: str) -> list[Any]:
+        return [
+            state.timestamp,
+            trader_data,
+            self.compress_listings(state.listings),
+            self.compress_order_depths(state.order_depths),
+            self.compress_trades(state.own_trades),
+            self.compress_trades(state.market_trades),
+            state.position,
+            self.compress_observations(state.observations),
+        ]
+
+    def compress_listings(self, listings: dict[Symbol, Listing]) -> list[list[Any]]:
+        compressed = []
+        for listing in listings.values():
+            compressed.append([listing.symbol, listing.product, listing.denomination])
+
+        return compressed
+
+    def compress_order_depths(self, order_depths: dict[Symbol, OrderDepth]) -> dict[Symbol, list[Any]]:
+        compressed = {}
+        for symbol, order_depth in order_depths.items():
+            compressed[symbol] = [order_depth.buy_orders, order_depth.sell_orders]
+
+        return compressed
+
+    def compress_trades(self, trades: dict[Symbol, list[Trade]]) -> list[list[Any]]:
+        compressed = []
+        for arr in trades.values():
+            for trade in arr:
+                compressed.append(
+                    [
+                        trade.symbol,
+                        trade.price,
+                        trade.quantity,
+                        trade.buyer,
+                        trade.seller,
+                        trade.timestamp,
+                    ]
+                )
+
+        return compressed
+
+    def compress_observations(self, observations: Observation) -> list[Any]:
+        conversion_observations = {}
+        for product, observation in observations.conversionObservations.items():
+            conversion_observations[product] = [
+                observation.bidPrice,
+                observation.askPrice,
+                observation.transportFees,
+                observation.exportTariff,
+                observation.importTariff,
+                observation.sugarPrice,
+                observation.sunlightIndex,
+            ]
+
+        return [observations.plainValueObservations, conversion_observations]
+
+    def compress_orders(self, orders: dict[Symbol, list[Order]]) -> list[list[Any]]:
+        compressed = []
+        for arr in orders.values():
+            for order in arr:
+                compressed.append([order.symbol, order.price, order.quantity])
+
+        return compressed
+
+    def to_json(self, value: Any) -> str:
+        return json.dumps(value, cls=ProsperityEncoder, separators=(",", ":"))
+
+    def truncate(self, value: str, max_length: int) -> str:
+        if len(value) <= max_length:
+            return value
+
+        return value[: max_length - 3] + "..."
+
+logger = Logger()
 
 class Strategy:
     def __init__(self, symbol: str, limit: int) -> None:
@@ -291,9 +407,9 @@ class BlackScholesStrat(Strategy):
             asset_log_returns = [math.log(asset_prices[i + 1] / asset_prices[i]) 
                                  for i in range(len(asset_prices) - 1)]
             volatility = stdev(asset_log_returns)
+        logger.print(f"Current asset volatility: {volatility}")
         S = self.curr_price(state)
         K = self.strike
-        # T = 5 # 5 days from beginning of round 3 to expiry, 251 trading days in a year
         T = 5 - (state.timestamp // 1000000)
         r = 0  # risk-free interest rate, assumed to be 0
         d_plus : float = (math.log(S / K) + (r + volatility ** 2 / 2) * T) / (volatility * np.sqrt(T))
@@ -309,6 +425,94 @@ class BlackScholesStrat(Strategy):
             real_price = (best_ask + best_bid) / 2
         except IndexError:
             real_price = fair_price
+        logger.print(f"Current fair price: {fair_price}, current actual price: {real_price}")
+        diff = fair_price - real_price
+
+        min_diff = 0
+        curr_pos = state.position.get(self.symbol, 0)
+        if diff > min_diff: 
+            # the option is underpriced, buy until  we reach the limit 
+            # or until the current best ask exceeds the fair price
+            for ask, vol in list(order_depth.sell_orders.items()):
+                if self.limit - curr_pos <= -vol:
+                    self.buy(ask, self.limit - curr_pos)
+                    curr_pos = self.limit
+                    break
+                else:
+                    self.buy(ask, -vol)
+                    curr_pos -= vol
+
+        elif diff < -min_diff:
+            # the option is overpriced, sell until we reach the limit
+            # or until the current best bid is less than the fair price
+            for bid, vol in list(order_depth.buy_orders.items()):
+                if self.limit + curr_pos <= vol:
+                    self.sell(bid, self.limit + curr_pos)
+                    curr_pos = -self.limit
+                    break
+                else:
+                    self.sell(bid, vol)
+                    curr_pos -= vol
+        else:
+            pass # option is fairly priced, do nothing
+
+        # Update past asset data
+        if len(self.past_asset_data) > self.max_sample_size:
+            self.past_asset_data = self.past_asset_data[1:]
+            self.past_asset_data.append(self.curr_price(state))
+        else:
+            self.past_asset_data.append(self.curr_price(state))
+        return
+
+class MonteCarloStrat(Strategy):
+    def __init__(self, symbol: str, limit: int, strike: int, n_simulations: int, asset: str):
+        super().__init__(symbol, limit)
+        self.past_asset_data: List[float] = []
+        self.asset = asset
+        self.strike = strike
+        self.n_simulations = n_simulations
+        self.max_sample_size = 100
+
+    def load(self, data: List[float]) -> None:
+        self.past_asset_data = data
+
+    def save(self):
+        return self.past_asset_data
+    
+    def curr_price(self, state: TradingState) -> float:
+    # Get the current price of the asset
+        best_ask_asset = list(state.order_depths[self.asset].sell_orders.items())[0][0]
+        best_bid_asset = list(state.order_depths[self.asset].buy_orders.items())[0][0]
+        return (best_ask_asset + best_bid_asset) / 2
+    
+    def calc_option_price(self, state: TradingState) -> List[float]:
+        asset_prices = self.past_asset_data
+        if len(asset_prices) < 3:
+            volatility = 1.0
+        else:
+            asset_log_returns = [math.log(asset_prices[i + 1] / asset_prices[i]) 
+                                 for i in range(len(asset_prices) - 1)]
+            volatility = stdev(asset_log_returns)
+        Z = np.random.standard_normal(self.n_simulations)
+        S = self.curr_price(state)
+        K = self.strike
+        T = 5 - (state.timestamp // 1000000) # 5 days from beginning of round 3 to expiry
+        r = 0
+        S_T = S * np.exp((r - (volatility ** 2) / 2) * T + volatility * np.sqrt(T) * Z)
+        payoffs = np.maximum(S_T - K, 0)
+        return np.mean(payoffs)
+    
+    def act(self, state: TradingState) -> None:
+        # same as in black scholes strategy
+        order_depth = state.order_depths[self.symbol]
+        fair_price = self.calc_option_price(state)
+        try:
+            best_ask = list(order_depth.sell_orders.items())[0][0]
+            best_bid = list(order_depth.buy_orders.items())[0][0]
+            real_price = (best_ask + best_bid) / 2
+        except IndexError:
+            real_price = fair_price
+        logger.print(f"Current fair price: {fair_price}, current actual price: {real_price}")
         diff = fair_price - real_price
 
         min_diff = 0
@@ -371,6 +575,27 @@ class VolcanicRockStrategy(MACD):
     def __init__(self, symbol: str, limit: int):
         super().__init__(symbol, limit, 100)
 
+class Volcanic9500Strat2(MonteCarloStrat):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol, limit, 9500, 100000, "VOLCANIC_ROCK")
+
+class Volcanic9750Strat2(MonteCarloStrat):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol, limit, 9750, 100000, "VOLCANIC_ROCK")
+
+class Volcanic10000Strat2(MonteCarloStrat):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol, limit, 10000, 100000, "VOLCANIC_ROCK")
+
+class Volcanic10250Strat2(MonteCarloStrat):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol, limit, 10250, 100000, "VOLCANIC_ROCK")
+
+class Volcanic10500Strat2(MonteCarloStrat):
+    def __init__(self, symbol: str, limit: int):
+        super().__init__(symbol, limit, 10500, 100000, "VOLCANIC_ROCK")
+
+        
 # Main trader class that coordinates multiple strategies
 class Trader:
     def __init__(self) -> None:
@@ -395,16 +620,23 @@ class Trader:
         self.strategies = {
             symbol: strat(symbol, limits[symbol]) 
             for symbol, strat in {
-                 "VOLCANIC_ROCK_VOUCHER_9500": Volcanic9500Strat,
-                 "VOLCANIC_ROCK_VOUCHER_9750": Volcanic9750Strat,
-                 "VOLCANIC_ROCK_VOUCHER_10000": Volcanic10000Strat,
-                 "VOLCANIC_ROCK_VOUCHER_10250": Volcanic10250Strat,
-                 "VOLCANIC_ROCK_VOUCHER_10500": Volcanic10500Strat,
-                 "VOLCANIC_ROCK": VolcanicRockStrategy,
+                # "VOLCANIC_ROCK_VOUCHER_9500": Volcanic9500Strat,
+                # "VOLCANIC_ROCK_VOUCHER_9750": Volcanic9750Strat,
+                # "VOLCANIC_ROCK_VOUCHER_10000": Volcanic10000Strat,
+                # "VOLCANIC_ROCK_VOUCHER_10250": Volcanic10250Strat,
+                # "VOLCANIC_ROCK_VOUCHER_10500": Volcanic10500Strat,
+                # "VOLCANIC_ROCK": VolcanicRockStrategy,
+                "VOLCANIC_ROCK_VOUCHER_9500": Volcanic9500Strat2,
+                "VOLCANIC_ROCK_VOUCHER_9750": Volcanic9750Strat2,
+                "VOLCANIC_ROCK_VOUCHER_10000": Volcanic10000Strat2,
+                "VOLCANIC_ROCK_VOUCHER_10250": Volcanic10250Strat2,
+                "VOLCANIC_ROCK_VOUCHER_10500": Volcanic10500Strat2,
+                "VOLCANIC_ROCK": VolcanicRockStrategy
             }.items()
         }
     
     def run(self, state: TradingState) -> tuple[dict[Symbol, list[Order]], int, str]:
+        # logger.print(state.position)  # Log current positions
 
         conversions = 0  # Unused here, placeholder for conversion tracking
 
@@ -426,5 +658,7 @@ class Trader:
 
 
         trader_data = json.dumps(new_trader_data, separators=(",", ":"))
+
+        logger.flush(state, result, conversions, trader_data)
 
         return result, conversions, trader_data
