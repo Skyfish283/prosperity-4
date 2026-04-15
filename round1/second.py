@@ -9,7 +9,7 @@ class Trader:
         conversions = 0
         traderData_out = "10000.0"  # Default return data
 
-        product = "ACH_COATED_OSMIUM"
+        product = "ASH_COATED_OSMIUM"
 
         # 1. Define your mean (fair value) and position limits
         fair_value = 10000.0
