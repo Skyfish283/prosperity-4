@@ -1,0 +1,96 @@
+def pepper_root_strategy(self, state: TradingState) -> List[Order]:
+    fair = 13000 + 1000 * (state.timestamp / 1000000)
+    pos = state.position.get('INTARIAN_PEPPER_ROOT', 0)
+    orders = []
+
+    # --- CLOSING STRATEGY ---
+    if state.timestamp >= 999000:
+        if pos == 0:
+            return orders
+
+        end_timestamp = 999000 + 10 * 1000
+        steps_remaining = max(1, (end_timestamp - state.timestamp) / 1000)
+
+        # ~15 passive fills per step (half of ~30 daily volume)
+        expected_passive_close = 15 * steps_remaining
+
+        # Aggression ramps from 0 (start of close) to 1 (final step)
+        aggression = max(0.0, 1.0 - (steps_remaining / 10))
+
+        if pos > 0:  # long — need to sell
+            # Passive: fair+1 (break-even on drift), aggressive: fair-5 (cross spread)
+            base_ask = int(fair + 1 - aggression * 6)
+            must_close_now = max(0, int(pos - expected_passive_close))
+
+            sell_levels = [
+                (base_ask,     max(must_close_now, 8)),
+                (base_ask + 1, 6),
+                (base_ask + 2, 4),
+            ]
+            remaining = pos
+            for price, qty in sell_levels:
+                actual = min(qty, remaining)
+                if actual > 0:
+                    orders.append(Order('INTARIAN_PEPPER_ROOT', price, -actual))
+                    remaining -= actual
+                if remaining <= 0:
+                    break
+
+        elif pos < 0:  # short — need to buy
+            # Passive: fair-1 (break-even on drift), aggressive: fair+5 (cross spread)
+            base_bid = int(fair - 1 + aggression * 6)
+            must_close_now = max(0, int(-pos - expected_passive_close))
+
+            buy_levels = [
+                (base_bid,     max(must_close_now, 8)),
+                (base_bid - 1, 6),
+                (base_bid - 2, 4),
+            ]
+            remaining = -pos
+            for price, qty in buy_levels:
+                actual = min(qty, remaining)
+                if actual > 0:
+                    orders.append(Order('INTARIAN_PEPPER_ROOT', price, actual))
+                    remaining -= actual
+                if remaining <= 0:
+                    break
+
+        return orders
+
+    # --- BUY SIDE ---
+    buy_capacity = 80 - pos
+    buy_levels = [
+        (int(fair),     4),
+        (int(fair) - 1, 6),
+        (int(fair) - 2, 8),
+        (int(fair) - 3, 10),
+        (int(fair) - 4, 5),
+    ]
+    remaining = buy_capacity
+    for price, qty in buy_levels:
+        actual = min(qty, remaining)
+        if actual > 0:
+            orders.append(Order('INTARIAN_PEPPER_ROOT', price, actual))
+            remaining -= actual
+        if remaining <= 0:
+            break
+
+    # --- SELL SIDE ---
+    sell_capacity = pos + 80
+    sell_levels = [
+        (int(fair) + 2, 4),
+        (int(fair) + 3, 6),
+        (int(fair) + 4, 8),
+        (int(fair) + 5, 10),
+        (int(fair) + 6, 5),
+    ]
+    remaining = sell_capacity
+    for price, qty in sell_levels:
+        actual = min(qty, remaining)
+        if actual > 0:
+            orders.append(Order('INTARIAN_PEPPER_ROOT', price, -actual))
+            remaining -= actual
+        if remaining <= 0:
+            break
+
+    return orders
