@@ -1,0 +1,6 @@
+candidate,research_pct,scale_pct,speed_pct,used_pct,used_budget,unused_budget,expected_speed_multiplier,gross_pnl,expected_pnl,heatmap_path,surface_path,speed_curve_path,plot_3d_path
+"beta(alpha=2, beta=2)",14,39,47,100,50000.00,0.00,0.469484,150413.60,100413.60,beta_a2_b2/research_scale_heatmap.svg,beta_a2_b2/research_scale_surface.csv,beta_a2_b2/speed_curve.csv,
+"beta(alpha=3, beta=2)",12,33,55,100,50000.00,0.00,0.418636,107491.54,57491.54,beta_a3_b2/research_scale_heatmap.svg,beta_a3_b2/research_scale_surface.csv,beta_a3_b2/speed_curve.csv,
+"beta(alpha=2, beta=3)",15,42,43,100,50000.00,0.00,0.568980,200991.06,150991.06,beta_a2_b3/research_scale_heatmap.svg,beta_a2_b3/research_scale_surface.csv,beta_a2_b3/speed_curve.csv,
+"beta(alpha=5, beta=5)",12,33,55,100,50000.00,0.00,0.606696,155778.98,105778.98,beta_a5_b5/research_scale_heatmap.svg,beta_a5_b5/research_scale_surface.csv,beta_a5_b5/speed_curve.csv,
+"beta(alpha=0.7, beta=0.7)",18,54,28,100,50000.00,0.00,0.361512,174366.89,124366.89,beta_a0p7_b0p7/research_scale_heatmap.svg,beta_a0p7_b0p7/research_scale_surface.csv,beta_a0p7_b0p7/speed_curve.csv,
